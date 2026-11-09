@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api } from "./api";
+import Icon from "./Icon";
 import { canonical, eligible, isActive, submissionKey } from "./domain";
 import type { Account, AuditEvent, Installment, Operation, Submission } from "./types";
 
@@ -158,21 +159,28 @@ export default function App() {
         <div className="app">
             <aside>
                 <a className="brand" href="/">
-                    porta<span>●</span>
+                    <span className="brand-mark">
+                        <Icon name="transfer" />
+                    </span>
+                    <span>porta</span>
                 </a>
                 <p className="brand-note">CONVÊNIOS · PORTABILIDADE</p>
                 <nav aria-label="Navegação principal">
                     <button
+                        type="button"
+                        aria-pressed={tab === "agenda"}
                         className={tab === "agenda" ? "active" : ""}
                         onClick={() => setTab("agenda")}
                     >
-                        ↗ Nova portabilidade
+                        <Icon name="transfer" /> Nova portabilidade
                     </button>
                     <button
+                        type="button"
+                        aria-pressed={tab === "history"}
                         className={tab === "history" ? "active" : ""}
                         onClick={() => setTab("history")}
                     >
-                        ◷ Histórico e auditoria
+                        <Icon name="history" /> Histórico e auditoria
                     </button>
                 </nav>
                 <div className="aside-foot">
@@ -199,21 +207,26 @@ export default function App() {
                                 : "Acompanhe os retornos da Central e a trilha de cada solicitação."}
                         </p>
                     </div>
-                    <span className="environment">SANDBOX</span>
+                    <span className="environment">
+                        <Icon name="shield" /> SANDBOX
+                    </span>
                 </header>
                 {error && (
                     <div role="alert" className="message error">
-                        {error}
+                        <Icon name="alert" />
+                        <span>{error}</span>
                     </div>
                 )}
                 {pollError && (
                     <div role="alert" className="message error">
-                        Atualização automática: {pollError}
+                        <Icon name="alert" />
+                        <span>Atualização automática: {pollError}</span>
                     </div>
                 )}
                 {notice && (
                     <div role="status" className="message success">
-                        {notice}
+                        <Icon name="check" />
+                        <span>{notice}</span>
                     </div>
                 )}
                 {tab === "agenda" ? (
@@ -295,7 +308,7 @@ export default function App() {
                                             disabled={busy}
                                             onClick={() => void action(() => refreshAgenda())}
                                         >
-                                            Atualizar agenda
+                                            <Icon name="refresh" /> Atualizar agenda
                                         </button>
                                     </div>
                                     <div className="table-wrap">
@@ -305,7 +318,7 @@ export default function App() {
                                                     <th>Selecionar</th>
                                                     <th>Parcela / convênio</th>
                                                     <th>Desconto</th>
-                                                    <th>Valor</th>
+                                                    <th className="amount">Valor</th>
                                                     <th>Situação</th>
                                                     <th>Conta atual</th>
                                                 </tr>
@@ -427,7 +440,10 @@ export default function App() {
                                             )}
                                         </div>
                                         <details>
-                                            <summary>Cenários de demonstração</summary>
+                                            <summary>
+                                                <Icon name="chevron" />
+                                                Cenários de demonstração
+                                            </summary>
                                             <label>
                                                 Comportamento da Central
                                                 <select
@@ -460,7 +476,8 @@ export default function App() {
                                             className="primary"
                                             disabled={busy || !selected.length}
                                         >
-                                            {busy ? "Registrando…" : "Solicitar portabilidade →"}
+                                            {busy ? "Registrando…" : "Solicitar portabilidade"}
+                                            <Icon name="arrow" />
                                         </button>
                                     </form>
                                 </section>
@@ -471,16 +488,19 @@ export default function App() {
                     <>
                         <div className="metrics">
                             <div>
+                                <Icon name="layers" />
                                 <span>Total de operações</span>
                                 <strong>{operations.length}</strong>
                             </div>
                             <div>
+                                <Icon name="clock" />
                                 <span>Em processamento</span>
                                 <strong>
                                     {operations.filter((o) => isActive(o.status)).length}
                                 </strong>
                             </div>
                             <div>
+                                <Icon name="check" />
                                 <span>Confirmadas</span>
                                 <strong>
                                     {operations.filter((o) => o.status === "CONFIRMADA").length}
@@ -522,7 +542,7 @@ export default function App() {
                                                         disabled={busy}
                                                         onClick={() => void openOperation(o)}
                                                     >
-                                                        Ver trilha
+                                                        Ver trilha <Icon name="chevron" />
                                                     </button>
                                                 </td>
                                             </tr>
