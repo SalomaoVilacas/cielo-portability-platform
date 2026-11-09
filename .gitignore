@@ -32,3 +32,9 @@ logs/
 
 # Temporary files
 *.tmp
+frontend/.vite/
+__pycache__/
+.e2e/
+
+# Also ignore locally linked dependency directories
+frontend/node_modules
