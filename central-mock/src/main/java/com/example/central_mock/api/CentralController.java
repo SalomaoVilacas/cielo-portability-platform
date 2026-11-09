@@ -20,28 +20,33 @@ public class CentralController {
     private final Validator validator;
     private final String secret;
 
-    public CentralController(CentralService s, JsonMapper j, Validator v, Environment e) {
-        service = s;
-        json = j;
-        validator = v;
-        secret = e.getRequiredProperty("integration.secret");
+    public CentralController(
+        CentralService centralService,
+        JsonMapper mapper,
+        Validator value,
+        Environment environment
+    ) {
+        service = centralService;
+        json = mapper;
+        validator = value;
+        secret = environment.getRequiredProperty("integration.secret");
     }
 
-    private void verify(HttpServletRequest req, String body) {
-        String t = req.getHeader("X-Timestamp");
+    private void verify(HttpServletRequest httpRequest, String body) {
+        String timestamp = httpRequest.getHeader("X-Timestamp");
         if (
-            !Integrity.fresh(t) ||
+            !Integrity.fresh(timestamp) ||
             !Integrity.valid(
                 secret,
                 Integrity.request(
-                    req.getMethod(),
-                    req.getRequestURI() +
+                    httpRequest.getMethod(),
+                    httpRequest.getRequestURI() +
                         "|" +
-                        Objects.toString(req.getHeader("Idempotency-Key"), ""),
-                    t,
+                        Objects.toString(httpRequest.getHeader("Idempotency-Key"), ""),
+                    timestamp,
                     body
                 ),
-                req.getHeader("X-Signature")
+                httpRequest.getHeader("X-Signature")
             )
         ) throw new ResponseStatusException(
             HttpStatus.UNAUTHORIZED,
@@ -49,12 +54,12 @@ public class CentralController {
         );
     }
 
-    private <T> T decode(String b, Class<T> type) {
+    private <T> T decode(String body, Class<T> type) {
         try {
-            T v = json.readValue(b, type);
-            if (!validator.validate(v).isEmpty()) throw new IllegalArgumentException();
-            return v;
-        } catch (RuntimeException e) {
+            T value = json.readValue(body, type);
+            if (!validator.validate(value).isEmpty()) throw new IllegalArgumentException();
+            return value;
+        } catch (RuntimeException environment) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Dados inválidos");
         }
     }
@@ -69,39 +74,42 @@ public class CentralController {
     }
 
     @PostMapping("/autorizacoes")
-    public ResponseEntity<String> authorize(HttpServletRequest req, @RequestBody String body) {
-        verify(req, body);
+    public ResponseEntity<String> authorize(
+        HttpServletRequest httpRequest,
+        @RequestBody String body
+    ) {
+        verify(httpRequest, body);
         return signed(201, service.authorize(decode(body, AuthorizationRequest.class)), "");
     }
 
     @GetMapping("/beneficiarios/{id}/agenda")
-    public ResponseEntity<String> agenda(HttpServletRequest req, @PathVariable String id) {
-        verify(req, "");
+    public ResponseEntity<String> agenda(HttpServletRequest httpRequest, @PathVariable String id) {
+        verify(httpRequest, "");
         return signed(200, service.agenda(id), "");
     }
 
     @PostMapping("/operacoes-portabilidade")
-    public ResponseEntity<String> submit(HttpServletRequest req, @RequestBody String body) {
-        verify(req, body);
-        Request r = decode(body, Request.class).normalized();
-        if (r.cenario().equals("INDISPONIVEL")) return signed(
+    public ResponseEntity<String> submit(HttpServletRequest httpRequest, @RequestBody String body) {
+        verify(httpRequest, body);
+        Request request = decode(body, Request.class).normalized();
+        if (request.cenario().equals("INDISPONIVEL")) return signed(
             503,
             Map.of("detail", "Indisponibilidade simulada"),
             ""
         );
-        boolean known = service.known(req.getHeader("Idempotency-Key"));
-        String protocol = service.submit(req.getHeader("Idempotency-Key"), r);
-        if (!known && r.cenario().equals("TIMEOUT")) try {
+        boolean known = service.known(httpRequest.getHeader("Idempotency-Key"));
+        String protocol = service.submit(httpRequest.getHeader("Idempotency-Key"), request);
+        if (!known && request.cenario().equals("TIMEOUT")) try {
             Thread.sleep(2500);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException environment) {
             Thread.currentThread().interrupt();
         }
-        if (r.cenario().equals("RESPOSTA_INVALIDA")) return signed(
+        if (request.cenario().equals("RESPOSTA_INVALIDA")) return signed(
             202,
             Map.of("protocolo", "invalido"),
             ""
         );
-        if (r.cenario().equals("ASSINATURA_INVALIDA")) return ResponseEntity.accepted()
+        if (request.cenario().equals("ASSINATURA_INVALIDA")) return ResponseEntity.accepted()
             .contentType(MediaType.APPLICATION_JSON)
             .header("X-Signature", "invalid")
             .body(json.writeValueAsString(Map.of("protocolo", protocol)));
@@ -109,17 +117,20 @@ public class CentralController {
     }
 
     @GetMapping("/operacoes-portabilidade/{protocol}")
-    public ResponseEntity<String> status(HttpServletRequest req, @PathVariable String protocol) {
-        verify(req, "");
+    public ResponseEntity<String> status(
+        HttpServletRequest httpRequest,
+        @PathVariable String protocol
+    ) {
+        verify(httpRequest, "");
         var state = service.status(protocol);
         return state.status().equals("PENDENTE") ? signed(204, null, "1") : signed(200, state, "");
     }
 
     @ExceptionHandler(ResponseStatusException.class)
-    public ResponseEntity<String> error(ResponseStatusException e) {
+    public ResponseEntity<String> error(ResponseStatusException environment) {
         return signed(
-            e.getStatusCode().value(),
-            Map.of("detail", Objects.toString(e.getReason(), "Erro na Central")),
+            environment.getStatusCode().value(),
+            Map.of("detail", Objects.toString(environment.getReason(), "Erro na Central")),
             ""
         );
     }

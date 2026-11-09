@@ -34,6 +34,9 @@ class PortabilityFlowTests {
     OperationStore store;
 
     @Autowired
+    org.springframework.jdbc.core.JdbcTemplate database;
+
+    @Autowired
     OperationWorker worker;
 
     @Autowired
@@ -52,6 +55,7 @@ class PortabilityFlowTests {
     static class FakeCentral implements CentralPort {
 
         boolean fail;
+        boolean unexpected;
         boolean reject;
         int submissions;
 
@@ -78,6 +82,9 @@ class PortabilityFlowTests {
 
         public String submit(String key, Request r) {
             submissions++;
+            if (unexpected && r.beneficiarioId().equals("B")) throw new IllegalStateException(
+                "Unexpected test failure"
+            );
             if (fail) throw new IntegrationFailure("Timeout de teste", true);
             return UUID.randomUUID().toString();
         }
@@ -101,17 +108,18 @@ class PortabilityFlowTests {
     }
 
     void ready() {
-        store.db().update("UPDATE operation SET next_attempt=0");
+        database.update("UPDATE operation SET next_attempt=0");
         worker.tick();
     }
 
     @BeforeEach
     void clear() {
-        store.db().update("DELETE FROM audit_event");
-        store.db().update("DELETE FROM reservation");
-        store.db().update("DELETE FROM operation");
-        store.db().update("DELETE FROM beneficiary_consent");
+        database.update("DELETE FROM audit_event");
+        database.update("DELETE FROM reservation");
+        database.update("DELETE FROM operation");
+        database.update("DELETE FROM beneficiary_consent");
         central.fail = false;
+        central.unexpected = false;
         central.reject = false;
         central.submissions = 0;
     }
@@ -130,7 +138,7 @@ class PortabilityFlowTests {
     void idempotencyAndConfirmation() {
         service.authorize(new AuthorizationRequest("B", "CONV"));
         var op = service.submit("key", request("B"));
-        assertEquals(op.get("id"), service.submit("key", request("B")).get("id"));
+        assertEquals(op.id(), service.submit("key", request("B")).id());
         assertEquals(
             409,
             assertThrows(ResponseStatusException.class, () ->
@@ -155,33 +163,42 @@ class PortabilityFlowTests {
                 .value()
         );
         ready();
-        assertEquals("PENDENTE", store.get((String) op.get("id")).get("status"));
+        assertEquals(
+            "PENDENTE",
+            store
+                .get((String) op.id())
+                .status()
+                .name()
+        );
         ready();
-        assertEquals("CONFIRMADA", store.get((String) op.get("id")).get("status"));
+        assertEquals(
+            "CONFIRMADA",
+            store
+                .get((String) op.id())
+                .status()
+                .name()
+        );
         ready();
         assertEquals(1, central.submissions);
-        assertEquals(3, store.events((String) op.get("id")).size());
+        assertEquals(3, store.events((String) op.id()).size());
     }
 
     @Test
     void retriesExhaustAndResumeWithSameOperation() {
         service.authorize(new AuthorizationRequest("B", "CONV"));
         var op = service.submit("key", request("B"));
-        String id = (String) op.get("id");
+        String id = (String) op.id();
         central.fail = true;
         ready();
-        assertEquals("PENDENTE_ENVIO", store.get(id).get("status"));
+        assertEquals("PENDENTE_ENVIO", store.get(id).status().name());
         ready();
-        assertEquals("FALHA_TECNICA", store.get(id).get("status"));
-        assertEquals(
-            1,
-            store.db().queryForObject("SELECT COUNT(*) FROM reservation", Integer.class)
-        );
+        assertEquals("FALHA_TECNICA", store.get(id).status().name());
+        assertEquals(1, database.queryForObject("SELECT COUNT(*) FROM reservation", Integer.class));
         central.fail = false;
         service.retry(id);
         ready();
         ready();
-        assertEquals("CONFIRMADA", store.get(id).get("status"));
+        assertEquals("CONFIRMADA", store.get(id).status().name());
         assertEquals(1, store.list().size());
     }
 
@@ -192,11 +209,14 @@ class PortabilityFlowTests {
         central.reject = true;
         ready();
         ready();
-        assertEquals("REJEITADA", store.get((String) op.get("id")).get("status"));
         assertEquals(
-            0,
-            store.db().queryForObject("SELECT COUNT(*) FROM reservation", Integer.class)
+            "REJEITADA",
+            store
+                .get((String) op.id())
+                .status()
+                .name()
         );
+        assertEquals(0, database.queryForObject("SELECT COUNT(*) FROM reservation", Integer.class));
         assertNotNull(service.submit("new", request("B")));
     }
 
@@ -206,7 +226,7 @@ class PortabilityFlowTests {
         try (var pool = Executors.newFixedThreadPool(4)) {
             var tasks = new ArrayList<Callable<String>>();
             for (int i = 0; i < 8; i++) tasks.add(
-                () -> (String) service.submit("same", request("B")).get("id")
+                () -> (String) service.submit("same", request("B")).id()
             );
             var results = pool.invokeAll(tasks);
             Set<String> ids = new HashSet<>();
@@ -222,5 +242,51 @@ class PortabilityFlowTests {
         assertTrue(Integrity.valid("secret", "payload", signature));
         assertFalse(Integrity.valid("secret", "tampered", signature));
         assertFalse(Integrity.fresh("0"));
+    }
+
+    @Test
+    void unexpectedFailureDoesNotBlockOtherOperations() {
+        service.authorize(new AuthorizationRequest("B", "CONV"));
+        service.authorize(new AuthorizationRequest("OTHER", "CONV"));
+        var broken = service.submit("broken", request("B"));
+        var healthy = service.submit("healthy", request("OTHER"));
+        central.unexpected = true;
+        ready();
+        assertEquals(1, store.get(broken.id()).tentativas());
+        assertEquals(OperationStatus.PENDENTE, store.get(healthy.id()).status());
+    }
+
+    @Test
+    void competingKeysCannotReserveTheSameParcel() throws Exception {
+        service.authorize(new AuthorizationRequest("B", "CONV"));
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var results = pool.invokeAll(
+                List.<Callable<Boolean>>of(() -> attempt("first"), () -> attempt("second"))
+            );
+            assertEquals(
+                1,
+                results
+                    .stream()
+                    .filter(result -> {
+                        try {
+                            return result.get();
+                        } catch (Exception exception) {
+                            throw new AssertionError(exception);
+                        }
+                    })
+                    .count()
+            );
+            assertEquals(1, store.list().size());
+        }
+    }
+
+    private boolean attempt(String key) {
+        try {
+            service.submit(key, request("B"));
+            return true;
+        } catch (ResponseStatusException failure) {
+            assertEquals(409, failure.getStatusCode().value());
+            return false;
+        }
     }
 }

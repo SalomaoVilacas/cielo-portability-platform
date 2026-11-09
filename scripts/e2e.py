@@ -94,7 +94,7 @@ def main():
                 assert a == b
                 return request(backend_url, f"/api/v1/beneficiaries/{id}/agenda")
             def submit(id, scenario="CONFIRMAR", key=None):
-                payload = {"beneficiarioId": id, "parcelas": [f"{id}-CONV-1"], "credorCessionario": "Cielo", "contaRecebimento": {"banco": "237", "agencia": "0002", "conta": "98765-4"}, "cenario": scenario}
+                payload = {"beneficiarioId": id, "parcelas": [request(backend_url, f"/api/v1/beneficiaries/{id}/agenda")[0]["parcelaId"]], "credorCessionario": "Cielo", "contaRecebimento": {"banco": "237", "agencia": "0002", "conta": "98765-4"}, "cenario": scenario}
                 op = request(backend_url, "/api/v1/portabilities", payload, key or id, expected=202)
                 return op, payload
             authorize("SUCCESS")
@@ -139,7 +139,7 @@ def main():
             print("PASS restart recovers persisted operation and history", flush=True)
             # Direct signed Central requests verify both directions, including 204 + Retry-After.
             request(central_url, "/autorizacoes", {"beneficiarioId": "DIRECT", "convenioId": "CONV"}, signed=True, expected=201)
-            direct = {"beneficiarioId": "DIRECT", "parcelas": ["DIRECT-CONV-1"], "credorCessionario": "Cielo", "contaRecebimento": {"banco": "237", "agencia": "1", "conta": "123"}, "cenario": "CONFIRMAR"}
+            direct = {"beneficiarioId": "DIRECT", "parcelas": [request(central_url, "/beneficiarios/DIRECT/agenda", signed=True)[0]["parcelaId"]], "credorCessionario": "Cielo", "contaRecebimento": {"banco": "237", "agencia": "1", "conta": "123"}, "cenario": "CONFIRMAR"}
             a = request(central_url, "/operacoes-portabilidade", direct, "DIRECT", True, 202)
             b = request(central_url, "/operacoes-portabilidade", direct, "DIRECT", True, 202)
             assert a == b

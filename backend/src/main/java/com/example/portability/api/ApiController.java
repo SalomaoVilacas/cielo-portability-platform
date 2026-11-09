@@ -1,6 +1,7 @@
 package com.example.portability.api;
 
 import com.example.portability.operation.*;
+import com.example.portability.operation.OperationModels.*;
 import com.example.portability.shared.Contracts.*;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
@@ -17,15 +18,15 @@ public class ApiController {
     private final PortabilityService service;
     private final OperationStore store;
 
-    public ApiController(PortabilityService s, OperationStore r) {
-        service = s;
-        store = r;
+    public ApiController(PortabilityService service, OperationStore store) {
+        this.service = service;
+        this.store = store;
     }
 
     @PostMapping("/authorizations")
     @ResponseStatus(HttpStatus.CREATED)
-    public Authorization authorize(@Valid @RequestBody AuthorizationRequest r) {
-        return service.authorize(r);
+    public Authorization authorize(@Valid @RequestBody AuthorizationRequest request) {
+        return service.authorize(request);
     }
 
     @GetMapping("/beneficiaries/{id}/agenda")
@@ -37,30 +38,30 @@ public class ApiController {
 
     @PostMapping("/portabilities")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public Map<String, Object> submit(
+    public View submit(
         @RequestHeader("Idempotency-Key") String key,
-        @Valid @RequestBody Request r
+        @Valid @RequestBody Request request
     ) {
-        return service.submit(key, r);
+        return service.submit(key, request);
     }
 
     @GetMapping("/portabilities")
-    public List<Map<String, Object>> list() {
+    public List<View> list() {
         return store.list();
     }
 
     @GetMapping("/portabilities/{id}")
-    public Map<String, Object> get(@PathVariable String id) {
+    public View get(@PathVariable String id) {
         return store.get(id);
     }
 
     @GetMapping("/portabilities/{id}/events")
-    public List<Map<String, Object>> events(@PathVariable String id) {
+    public List<Event> events(@PathVariable String id) {
         return store.events(id);
     }
 
     @PostMapping("/portabilities/{id}/retry")
-    public Map<String, Object> retry(@PathVariable String id) {
+    public View retry(@PathVariable String id) {
         return service.retry(id);
     }
 }

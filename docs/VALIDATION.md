@@ -6,8 +6,8 @@ Implementação funcional dos fluxos do PDF: opt-in, agenda, seleção, portabil
 
 ## Validação
 
-- 11 testes Java: 7 backend, 4 Central, sem falhas.
-- 4 testes frontend, sem falhas.
+- 21 testes Java: 14 backend, 7 Central, sem falhas.
+- 6 testes frontend (domínio e renderização React), sem falhas.
 - Compilação TypeScript e build Vite aprovados.
 - Testes ponta a ponta com dois processos reais: confirmação/conta, concorrência e replay, conflito de payload, rejeição, reserva, falhas de protocolo e assinatura, indisponibilidade, timeout após aceite, persistência após reinício e 204/Retry-After.
 - Fluxo de autorização → seleção → envio → confirmação → auditoria validado no navegador.
@@ -21,3 +21,5 @@ JDBC substituiu JPA sem uso para deixar transações, locks e constraints explí
 ## Limites
 
 Worker de instância única; HMAC simplificado e segredo de demonstração; sem autenticação de usuário; auditoria imutável pela aplicação, sem proteção contra administrador SQL; sem validação bancária real. Esses limites são escolhas de case, não garantias de produção.
+
+Refinamento: contrato HTTP malformado, isolamento do lote, conflito concorrente, migração V1→V2 e rollback de confirmação com múltiplas parcelas cobertos. Fluxo automatizado de navegador executado por browser-flow.mjs no navegador conectado. Detalhes em REFINEMENT.md.

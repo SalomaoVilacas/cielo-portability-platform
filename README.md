@@ -13,13 +13,13 @@ Pré-requisitos: Java 21 e Node 24. Não exige Maven global, Docker ou banco ext
 Terminal 1 — Central:
 
 ```sh
-java -jar central-mock/target/central-mock-0.1.0-SNAPSHOT.jar
+python3 scripts/run_service.py central-mock
 ```
 
 Terminal 2 — backend:
 
 ```sh
-java -jar backend/target/backend-0.1.0-SNAPSHOT.jar
+python3 scripts/run_service.py backend
 ```
 
 Terminal 3 — frontend:
@@ -43,7 +43,7 @@ Com o cache Java disponível:
 ## Demonstração
 
 1. Informe BEN-001 / CONV-001 ou identificadores próprios (letras, números e hífens).
-2. Marque o consentimento e autorize. O mock gera seis parcelas: cinco abertas futuras e uma paga.
+2. Marque o consentimento e autorize. O mock gera seis parcelas com UUIDs opacos: cinco abertas futuras e uma paga.
 3. Selecione abertas; informe credor, banco de três dígitos, agência e conta.
 4. Solicite a portabilidade. O histórico acompanha o resultado automaticamente.
 5. Abra Ver trilha; depois volte à agenda e clique em Atualizar agenda para conferir a conta.
@@ -112,7 +112,7 @@ Cada serviço tem H2 e migrações Flyway independentes.
 - operation: serviço de aplicação, persistência SQL e dispatcher.
 - integration: porta, adaptador HTTP e classificação de falhas.
 - shared: contratos e HMAC pequenos, duplicados para evitar acoplamento entre serviços.
-- frontend/src: App coordena fluxos; api centraliza transporte; domain contém regras puras; types define contratos.
+- frontend/src: App coordena formulários; hooks/useOperations centraliza polling e invalidação da agenda; components/OperationSummary apresenta os detalhes; api centraliza transporte; domain contém regras puras; types define contratos.
 
 O backend grava operação, reservas e evento na mesma transação antes do 202. O worker envia, persiste o protocolo e consulta o resultado. A Central muda conta e estado atomicamente. Se a gravação local falhar depois da confirmação externa, a próxima consulta reconcilia sem repetir efeitos.
 
@@ -178,3 +178,41 @@ Veja docs/CASE_REVIEW.md e docs/AI_HARNESS.md.
 ## GitHub Actions
 
 A configuração .github/workflows/ci.yml foi preparada localmente. O GitHub recusou seu envio porque a credencial atual não possui escopo workflow. Por isso o arquivo permanece fora do commit publicado. Para ativar CI, um usuário com a permissão correspondente deve adicioná-lo pelo GitHub ou por uma credencial autorizada. Nenhuma permissão da conta foi alterada pelo agente.
+
+## Refinamentos de robustez
+
+- Repositório JDBC encapsula SQL; serviços e worker usam modelos tipados.
+- OperationStatus centraliza estados; falhas de uma operação não interrompem o lote.
+- Respostas da Central são verificadas por endpoint, incluindo campos ausentes/nulos, agenda incompleta e status inválido.
+- Migrações V2 adicionam instante/versão de consentimento e snapshot financeiro. Registros antigos mantêm campos novos nulos: não fabricamos evidência histórica.
+- Detalhes incluem credor, destino, parcelas e total do snapshot quando disponível.
+- Agenda é invalidada após confirmação/rejeição. O hook cancela requisições ao desmontar ou mudar o contexto.
+- Logs possuem operationId, protocolo, tentativa e duração, sem corpo ou conta. Métricas sem IDs como tags: portability.pending, portability.pending.oldest.seconds, portability.integration.failures, portability.integration.duration e portability.completed.
+- Métricas disponíveis no backend em /actuator/metrics, apenas para este ambiente local de demonstração.
+- O launcher copia o JAR para uma pasta temporária antes de executar. Evita substituir a aplicação em execução ao recompilar.
+
+### Diagnosticar consistência
+
+```sh
+python3 scripts/diagnose.py
+```
+
+Consulta somente histórico e agendas, verificando assinatura. Compara parcelas e contas confirmadas sem chamar endpoints de mudança de estado. BACKEND_URL, CENTRAL_URL e INTEGRATION_SECRET permitem outro ambiente.
+
+Após recompilar, reinicie os serviços para carregar o código novo e aplicar V2. Não exclua arquivos H2 nem altere V1.
+
+### Teste de navegador sem novas instalações
+
+O fluxo reutilizável está em scripts/browser-flow.mjs. Ele foi executado no navegador conectado do Codex: consentimento, formulário, duas parcelas, confirmação, atualização automática da agenda, resumo e histórico após reload.
+
+O runner CLI scripts/browser-test.mjs pode usar uma instalação **já existente** de Playwright e um navegador compatível. Não instala dependências nem navegadores:
+
+```sh
+PLAYWRIGHT_MODULE=/caminho/existente/playwright/index.mjs CHROME_BIN=/caminho/existente/chrome APP_URL=http://localhost:5173 node scripts/browser-test.mjs
+```
+
+A suíte npm test não depende de Playwright: inclui testes de domínio e renderização React com validação de formulário e escape de conteúdo.
+
+### CI
+
+O template atualizado está versionado em ci/verify.yml. Para ativá-lo, um usuário autorizado deve copiá-lo para .github/workflows/verify.yml. O token Git atual não permite publicar workflows; o arquivo .github original permanece local. A execução no GitHub Actions não foi realizada.

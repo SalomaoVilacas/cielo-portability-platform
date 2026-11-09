@@ -15,19 +15,19 @@ import tools.jackson.databind.json.JsonMapper;
 @Service
 public class CentralService {
 
-    private final JdbcTemplate db;
+    private final JdbcTemplate database;
     private final JsonMapper json;
     private final long delay;
 
-    public CentralService(JdbcTemplate d, JsonMapper j, Environment e) {
-        db = d;
-        json = j;
-        delay = e.getProperty("central.confirmation-delay-ms", Long.class, 5000L);
+    public CentralService(JdbcTemplate dataSource, JsonMapper mapper, Environment environment) {
+        database = dataSource;
+        json = mapper;
+        delay = environment.getProperty("central.confirmation-delay-ms", Long.class, 5000L);
     }
 
     public boolean known(String key) {
         return (
-            db.queryForObject(
+            database.queryForObject(
                 "SELECT COUNT(*) FROM operation WHERE idem_key=?",
                 Integer.class,
                 key
@@ -36,34 +36,39 @@ public class CentralService {
     }
 
     private void lock() {
-        db.queryForObject("SELECT id FROM submission_lock WHERE id=1 FOR UPDATE", Integer.class);
+        database.queryForObject(
+            "SELECT id FROM submission_lock WHERE id=1 FOR UPDATE",
+            Integer.class
+        );
     }
 
     @Transactional
-    public Authorization authorize(AuthorizationRequest r) {
+    public Authorization authorize(AuthorizationRequest request) {
         lock();
-        var rows = db.queryForList(
+        var rows = database.queryForList(
             "SELECT id FROM beneficiary_consent WHERE beneficiary=? AND agreement=?",
-            r.beneficiarioId(),
-            r.convenioId()
+            request.beneficiarioId(),
+            request.convenioId()
         );
         if (!rows.isEmpty()) return new Authorization(
             (String) rows.getFirst().get("ID"),
-            r.beneficiarioId(),
-            r.convenioId()
+            request.beneficiarioId(),
+            request.convenioId()
         );
         String id = UUID.randomUUID().toString();
-        db.update(
-            "INSERT INTO beneficiary_consent VALUES(?,?,?)",
+        database.update(
+            "INSERT INTO beneficiary_consent(id,beneficiary,agreement,captured_at,consent_version) VALUES(?,?,?,?,?)",
             id,
-            r.beneficiarioId(),
-            r.convenioId()
+            request.beneficiarioId(),
+            request.convenioId(),
+            Instant.now().toString(),
+            "agenda-opt-in-v1"
         );
-        for (int i = 1; i <= 6; i++) db.update(
+        for (int i = 1; i <= 6; i++) database.update(
             "INSERT INTO installment VALUES(?,?,?,?,?,?,?,?,?)",
-            r.beneficiarioId() + "-" + r.convenioId() + "-" + i,
-            r.beneficiarioId(),
-            r.convenioId(),
+            UUID.randomUUID().toString(),
+            request.beneficiarioId(),
+            request.convenioId(),
             new BigDecimal("350.25").add(BigDecimal.valueOf(i * 20)),
             LocalDate.now().plusMonths(i),
             i == 6 ? "PAGA" : "ABERTA",
@@ -71,30 +76,30 @@ public class CentralService {
             "0001",
             "12345-6"
         );
-        return new Authorization(id, r.beneficiarioId(), r.convenioId());
+        return new Authorization(id, request.beneficiarioId(), request.convenioId());
     }
 
     public List<Installment> agenda(String id) {
         if (
-            db.queryForObject(
+            database.queryForObject(
                 "SELECT COUNT(*) FROM beneficiary_consent WHERE beneficiary=?",
                 Integer.class,
                 id
             ) == 0
         ) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Beneficiário sem autorização");
-        return db.query(
+        return database.query(
             "SELECT i.* FROM installment i JOIN beneficiary_consent a ON a.beneficiary=i.beneficiary AND a.agreement=i.agreement WHERE i.beneficiary=? ORDER BY due_date,id",
-            (rs, n) ->
+            (result, n) ->
                 new Installment(
-                    rs.getString("id"),
-                    rs.getString("agreement"),
-                    rs.getBigDecimal("amount"),
-                    rs.getDate("due_date").toLocalDate(),
-                    rs.getString("status"),
+                    result.getString("id"),
+                    result.getString("agreement"),
+                    result.getBigDecimal("amount"),
+                    result.getDate("due_date").toLocalDate(),
+                    result.getString("status"),
                     new Account(
-                        rs.getString("bank"),
-                        rs.getString("branch"),
-                        rs.getString("account")
+                        result.getString("bank"),
+                        result.getString("branch"),
+                        result.getString("account")
                     )
                 ),
             id
@@ -108,9 +113,9 @@ public class CentralService {
             "Idempotency-Key inválida"
         );
         lock();
-        Request r = input.normalized();
-        String payload = json.writeValueAsString(r);
-        var previous = db.queryForList(
+        Request request = input.normalized();
+        String payload = json.writeValueAsString(request);
+        var previous = database.queryForList(
             "SELECT protocol,payload FROM operation WHERE idem_key=?",
             key
         );
@@ -123,8 +128,8 @@ public class CentralService {
             );
             return (String) previous.getFirst().get("PROTOCOL");
         }
-        var agenda = agenda(r.beneficiarioId());
-        for (String id : r.parcelas()) {
+        var agenda = agenda(request.beneficiarioId());
+        for (String id : request.parcelas()) {
             var p = agenda
                 .stream()
                 .filter(i -> i.parcelaId().equals(id))
@@ -138,7 +143,7 @@ public class CentralService {
             if (
                 !p.status().equals("ABERTA") ||
                 !p.dataDesconto().isAfter(LocalDate.now()) ||
-                db.queryForObject(
+                database.queryForObject(
                     "SELECT COUNT(*) FROM reservation WHERE parcel_id=?",
                     Integer.class,
                     id
@@ -146,24 +151,24 @@ public class CentralService {
             ) throw new ResponseStatusException(HttpStatus.CONFLICT, "Parcela não elegível");
         }
         String protocol = UUID.randomUUID().toString();
-        db.update(
+        database.update(
             "INSERT INTO operation VALUES(?,?,?,?,?,?,NULL)",
             protocol,
             key,
             payload,
             "PENDENTE",
             System.currentTimeMillis() + delay,
-            r.cenario()
+            request.cenario()
         );
-        for (String id : r.parcelas())
-            db.update("INSERT INTO reservation VALUES(?,?)", id, protocol);
+        for (String id : request.parcelas())
+            database.update("INSERT INTO reservation VALUES(?,?)", id, protocol);
         return protocol;
     }
 
     @Transactional
     public CentralStatus status(String protocol) {
         lock();
-        var rows = db.queryForList("SELECT * FROM operation WHERE protocol=?", protocol);
+        var rows = database.queryForList("SELECT * FROM operation WHERE protocol=?", protocol);
         if (rows.isEmpty()) throw new ResponseStatusException(
             HttpStatus.NOT_FOUND,
             "Protocolo não encontrado"
@@ -174,23 +179,23 @@ public class CentralService {
             state.equals("PENDENTE") &&
             System.currentTimeMillis() >= ((Number) row.get("READY_AT")).longValue()
         ) {
-            Request r = json.readValue((String) row.get("PAYLOAD"), Request.class);
-            boolean rejected = r.cenario().equals("REJEITAR");
+            Request request = json.readValue((String) row.get("PAYLOAD"), Request.class);
+            boolean rejected = request.cenario().equals("REJEITAR");
             state = rejected ? "REJEITADA" : "CONFIRMADA";
             String reason = rejected
                 ? "Central recusou a transferência no cenário de demonstração"
                 : null;
             if (!rejected) {
-                for (String id : r.parcelas())
-                    db.update(
+                for (String id : request.parcelas())
+                    database.update(
                         "UPDATE installment SET status='PORTADA',bank=?,branch=?,account=? WHERE id=?",
-                        r.contaRecebimento().banco(),
-                        r.contaRecebimento().agencia(),
-                        r.contaRecebimento().conta(),
+                        request.contaRecebimento().banco(),
+                        request.contaRecebimento().agencia(),
+                        request.contaRecebimento().conta(),
                         id
                     );
-            } else db.update("DELETE FROM reservation WHERE protocol=?", protocol);
-            db.update(
+            } else database.update("DELETE FROM reservation WHERE protocol=?", protocol);
+            database.update(
                 "UPDATE operation SET status=?,reason=? WHERE protocol=?",
                 state,
                 reason,

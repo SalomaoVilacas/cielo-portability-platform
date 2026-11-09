@@ -18,3 +18,7 @@ Resultados que mudaram a implementação:
 Validação Java offline, dependências frontend reutilizadas localmente. A opção aether.syncContext.named.factory=noop foi usada somente no ambiente restrito do agente para evitar gravação de locks no cache Maven. Não é exigência do projeto nem recomendação para builds concorrentes.
 
 O candidato deve executar o README e estudar CASE_REVIEW.md. O uso de IA não substitui compreensão das invariantes, limites e testes. As hipóteses e limitações estão documentadas, sem alegação de prontidão de produção.
+
+## Refinamento após auditoria
+
+O usuário solicitou publicação separada do design e correção das lacunas identificadas. A revisão dirigiu testes de respostas malformadas, colisão de IDs, isolamento de falhas, migração, renderização e fluxo real de navegador. Foram usados somente recursos já disponíveis. O relatório REFINEMENT.md registra a comparação dos bancos existentes e as limitações de CI/reinício dos processos externos.

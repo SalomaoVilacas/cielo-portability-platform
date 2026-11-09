@@ -944,3 +944,20 @@ footer {
         background: var(--glass-strong);
     }
 }
+
+.operation-summary {
+    margin: 24px 0;
+    font-variant-numeric: tabular-nums;
+}
+.operation-summary dt {
+    color: var(--secondary);
+    font-size: 12px;
+}
+.operation-summary dd {
+    margin: 8px 0 0;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+.operation-summary ul {
+    padding: 0 20px 16px;
+}

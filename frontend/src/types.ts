@@ -15,6 +15,7 @@ export type Operation = {
     criadaEm: string;
     motivo: string | null;
     tentativas: number;
+    detalhes?: { solicitacao: Submission; parcelas: Installment[]; valorTotal: number | null };
 };
 export type AuditEvent = { instante: string; tipo: string; detalhe: string };
 export type Submission = {

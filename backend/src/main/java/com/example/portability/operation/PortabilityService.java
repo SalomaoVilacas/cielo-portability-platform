@@ -1,8 +1,9 @@
 package com.example.portability.operation;
 
 import com.example.portability.integration.CentralPort;
+import com.example.portability.operation.OperationModels.*;
 import com.example.portability.shared.Contracts.*;
-import java.time.*;
+import java.time.LocalDate;
 import java.util.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -15,102 +16,73 @@ public class PortabilityService {
 
     private final OperationStore store;
     private final CentralPort central;
-    private final TransactionTemplate tx;
+    private final TransactionTemplate transactions;
     private final JsonMapper json;
 
     public PortabilityService(
-        OperationStore s,
-        CentralPort c,
-        TransactionTemplate t,
-        JsonMapper j
+        OperationStore store,
+        CentralPort central,
+        TransactionTemplate transactions,
+        JsonMapper json
     ) {
-        store = s;
-        central = c;
-        tx = t;
-        json = j;
+        this.store = store;
+        this.central = central;
+        this.transactions = transactions;
+        this.json = json;
     }
 
-    public Authorization authorize(AuthorizationRequest r) {
-        Authorization result = central.authorize(r);
-        tx.executeWithoutResult(t -> {
-            store.lock();
-            if (
-                store
-                    .db()
-                    .queryForObject(
-                        "SELECT COUNT(*) FROM beneficiary_consent WHERE beneficiary=? AND agreement=?",
-                        Integer.class,
-                        r.beneficiarioId(),
-                        r.convenioId()
-                    ) == 0
-            ) store
-                .db()
-                .update(
-                    "INSERT INTO beneficiary_consent VALUES(?,?,?)",
-                    result.autorizacaoId(),
-                    r.beneficiarioId(),
-                    r.convenioId()
-                );
+    public Authorization authorize(AuthorizationRequest request) {
+        Authorization authorization = central.authorize(request);
+        transactions.executeWithoutResult(transaction -> {
+            store.lockSubmission();
+            store.recordConsent(authorization);
         });
-        return result;
+        return authorization;
     }
 
-    public List<Installment> agenda(String id) {
-        if (
-            store
-                .db()
-                .queryForObject(
-                    "SELECT COUNT(*) FROM beneficiary_consent WHERE beneficiary=?",
-                    Integer.class,
-                    id
-                ) == 0
-        ) throw new ResponseStatusException(
+    public List<Installment> agenda(String beneficiary) {
+        if (!store.hasConsent(beneficiary)) throw new ResponseStatusException(
             HttpStatus.FORBIDDEN,
             "Registre a autorização antes de consultar a agenda"
         );
-        var reserved = new HashSet<>(
-            store.db().queryForList("SELECT parcel_id FROM reservation", String.class)
-        );
+        Set<String> reserved = store.reservedIds();
         return central
-            .agenda(id)
+            .agenda(beneficiary)
             .stream()
-            .map(p ->
-                reserved.contains(p.parcelaId()) && p.status().equals("ABERTA")
+            .map(parcel ->
+                reserved.contains(parcel.parcelaId()) && parcel.status().equals("ABERTA")
                     ? new Installment(
-                          p.parcelaId(),
-                          p.convenioId(),
-                          p.valor(),
-                          p.dataDesconto(),
+                          parcel.parcelaId(),
+                          parcel.convenioId(),
+                          parcel.valor(),
+                          parcel.dataDesconto(),
                           "RESERVADA",
-                          p.contaRecebimento()
+                          parcel.contaRecebimento()
                       )
-                    : p
+                    : parcel
             )
             .toList();
     }
 
-    public Map<String, Object> submit(String key, Request input) {
+    public View submit(String key, Request input) {
         if (key == null || !key.matches("[A-Za-z0-9-]{1,100}")) throw new ResponseStatusException(
             HttpStatus.BAD_REQUEST,
             "Idempotency-Key inválida"
         );
-        Request r = input.normalized();
-        String payload = json.writeValueAsString(r);
-        var existing = store
-            .db()
-            .queryForList("SELECT id,payload FROM operation WHERE idem_key=?", key);
-        if (!existing.isEmpty()) return replay(existing.getFirst(), payload);
-        var parcels = agenda(r.beneficiarioId());
-        return tx.execute(t -> {
-            store.lock();
-            var rows = store
-                .db()
-                .queryForList("SELECT id,payload FROM operation WHERE idem_key=?", key);
-            if (!rows.isEmpty()) return replay(rows.getFirst(), payload);
-            for (String id : r.parcelas()) {
-                var p = parcels
+        Request request = input.normalized();
+        String payload = json.writeValueAsString(request);
+        var existing = store.findByKey(key);
+        if (existing.isPresent()) return replay(existing.get(), payload);
+        List<Installment> agenda = agenda(request.beneficiarioId());
+        return transactions.execute(transaction -> {
+            store.lockSubmission();
+            var concurrent = store.findByKey(key);
+            if (concurrent.isPresent()) return replay(concurrent.get(), payload);
+            List<Installment> selected = new ArrayList<>();
+            for (String parcelId : request.parcelas()) {
+                Installment parcel = agenda
                     .stream()
-                    .filter(i -> i.parcelaId().equals(id))
+                    .filter(candidate -> candidate.parcelaId().equals(parcelId))
                     .findFirst()
                     .orElseThrow(() ->
                         new ResponseStatusException(
@@ -119,66 +91,36 @@ public class PortabilityService {
                         )
                     );
                 if (
-                    !p.status().equals("ABERTA") || !p.dataDesconto().isAfter(LocalDate.now())
+                    !parcel.status().equals("ABERTA") ||
+                    !parcel.dataDesconto().isAfter(LocalDate.now())
                 ) throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "Parcela não elegível: " + id
+                    "Parcela não elegível: " + parcelId
                 );
+                selected.add(parcel);
             }
-            for (String p : r.parcelas())
-                if (
-                    store
-                        .db()
-                        .queryForObject(
-                            "SELECT COUNT(*) FROM reservation WHERE parcel_id=?",
-                            Integer.class,
-                            p
-                        ) > 0
-                ) throw new ResponseStatusException(HttpStatus.CONFLICT, "Parcela já reservada");
-            String id = UUID.randomUUID().toString();
-            store
-                .db()
-                .update(
-                    "INSERT INTO operation(id,idem_key,payload,beneficiary,status,next_attempt,created_at) VALUES(?,?,?,?,?,?,?)",
-                    id,
-                    key,
-                    payload,
-                    r.beneficiarioId(),
-                    "PENDENTE_ENVIO",
-                    System.currentTimeMillis(),
-                    Instant.now().toString()
-                );
-            for (String p : r.parcelas())
-                store.db().update("INSERT INTO reservation VALUES(?,?)", p, id);
-            store.event(id, "SOLICITADA", "Solicitação persistida; aguardando envio à Central");
-            return store.get(id);
+            return store.get(store.create(key, payload, request, selected));
         });
     }
 
-    private Map<String, Object> replay(Map<String, Object> row, String p) {
-        if (!p.equals(row.get("PAYLOAD"))) throw new ResponseStatusException(
+    private View replay(StoredOperation operation, String payload) {
+        if (!payload.equals(operation.payload())) throw new ResponseStatusException(
             HttpStatus.CONFLICT,
             "Chave de idempotência já utilizada com outro conteúdo"
         );
-        return store.get((String) row.get("ID"));
+        return store.get(operation.id());
     }
 
-    public Map<String, Object> retry(String id) {
-        return tx.execute(t -> {
-            store.lock();
-            var r = store.get(id);
-            if (!"FALHA_TECNICA".equals(r.get("status"))) throw new ResponseStatusException(
+    public View retry(String id) {
+        return transactions.execute(transaction -> {
+            store.lockSubmission();
+            if (
+                store.require(id).status() != OperationStatus.FALHA_TECNICA
+            ) throw new ResponseStatusException(
                 HttpStatus.CONFLICT,
                 "Somente falhas técnicas podem ser retomadas"
             );
-            store
-                .db()
-                .update(
-                    "UPDATE operation SET status=CASE WHEN protocol IS NULL THEN 'PENDENTE_ENVIO' ELSE 'PENDENTE' END,attempts=0,next_attempt=?,reason=NULL WHERE id=?",
-                    System.currentTimeMillis(),
-                    id
-                );
-            store.event(id, "RETOMADA", "Reconciliação manual com a mesma chave de idempotência");
+            store.resume(id);
             return store.get(id);
         });
     }

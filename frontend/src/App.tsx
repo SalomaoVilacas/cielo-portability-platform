@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api } from "./api";
 import Icon from "./Icon";
+import OperationSummary from "./components/OperationSummary";
+import { useOperations } from "./hooks/useOperations";
 import { canonical, eligible, isActive, submissionKey } from "./domain";
 import type { Account, AuditEvent, Installment, Operation, Submission } from "./types";
 
@@ -37,14 +39,15 @@ export default function App() {
         conta: "",
     });
     const [scenario, setScenario] = useState("CONFIRMAR");
-    const [operations, setOperations] = useState<Operation[]>([]);
-    const [current, setCurrent] = useState<Operation | null>(null);
-    const [events, setEvents] = useState<AuditEvent[]>([]);
+    const { operations, current, setCurrent, events, setEvents, pollError } = useOperations(
+        authorized,
+        setAgenda,
+        setSelected,
+    );
     const [busy, setBusy] = useState(false);
     const lock = useRef(false);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
-    const [pollError, setPollError] = useState("");
     async function action(work: () => Promise<void>) {
         if (lock.current) return;
         lock.current = true;
@@ -115,42 +118,6 @@ export default function App() {
             setNotice("Solicitação registrada. O acompanhamento é automático.");
         });
     }
-    useEffect(() => {
-        const controller = new AbortController();
-        let timer: ReturnType<typeof setTimeout>;
-        async function poll() {
-            try {
-                const rows = await api<Operation[]>("/portabilities", {
-                    signal: controller.signal,
-                });
-                if (controller.signal.aborted) return;
-                setOperations(rows);
-                setPollError("");
-                if (current) {
-                    const op = rows.find((o) => o.id === current.id);
-                    const history = await api<AuditEvent[]>(
-                        "/portabilities/" + current.id + "/events",
-                        { signal: controller.signal },
-                    );
-                    if (controller.signal.aborted) return;
-                    if (op) setCurrent(op);
-                    setEvents(history);
-                }
-            } catch (e) {
-                if (!controller.signal.aborted)
-                    setPollError(
-                        e instanceof Error ? e.message : "Não foi possível atualizar o histórico",
-                    );
-            } finally {
-                if (!controller.signal.aborted) timer = setTimeout(poll, 2000);
-            }
-        }
-        void poll();
-        return () => {
-            controller.abort();
-            clearTimeout(timer);
-        };
-    }, [current?.id]);
     const total =
         agenda
             .filter((p) => selected.includes(p.parcelaId))
@@ -557,6 +524,7 @@ export default function App() {
                         {current && (
                             <section className="card">
                                 <h2>Trilha da operação</h2>
+                                <OperationSummary operation={current} />
                                 <p>
                                     <code>{current.id}</code>
                                 </p>
