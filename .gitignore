@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+
+# JetBrains
+.idea/
+*.iml
+
+# Maven
+**/target/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# H2 databases
+**/*.mv.db
+**/*.trace.db
+
+# Runtime data
+backend/data/
+central-mock/data/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
