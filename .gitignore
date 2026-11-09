@@ -38,3 +38,6 @@ __pycache__/
 
 # Also ignore locally linked dependency directories
 frontend/node_modules
+
+# Dependencies of repository tooling
+/node_modules

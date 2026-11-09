@@ -7,6 +7,7 @@ Diretrizes: inicialmente execução guiada, depois diagnóstico somente leitura,
 Processo: inspeção → contratos/migrações → backend/worker → Central assinada → frontend → testes locais/HTTP → revisão/documentação.
 
 Resultados que mudaram a implementação:
+
 - Linha vazia antes da declaração XML corrigida no setup.
 - Nome SQL reservado pelo H2 substituído por beneficiary_consent.
 - Teste concorrente encontrou corrida entre reserva e replay; replay passou a preceder elegibilidade dentro do lock.

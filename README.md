@@ -6,29 +6,29 @@ Case full stack: consentimento, agenda, seleção de parcelas, portabilidade ass
 
 Pré-requisitos: Java 21 e Node 24. Não exige Maven global, Docker ou banco externo. Execute na raiz:
 
-~~~sh
+```sh
 ./mvnw verify
-~~~
+```
 
 Terminal 1 — Central:
 
-~~~sh
+```sh
 java -jar central-mock/target/central-mock-0.1.0-SNAPSHOT.jar
-~~~
+```
 
 Terminal 2 — backend:
 
-~~~sh
+```sh
 java -jar backend/target/backend-0.1.0-SNAPSHOT.jar
-~~~
+```
 
 Terminal 3 — frontend:
 
-~~~sh
+```sh
 cd frontend
 npm ci
 npm run dev
-~~~
+```
 
 Abra http://localhost:5173. No IntelliJ, os métodos main de CentralMockApplication e BackendApplication também funcionam. Configure o diretório de trabalho como a raiz do repositório. Pare execuções anteriores da IDE se ocuparem 8080/8081.
 
@@ -36,9 +36,9 @@ A validação local do agente não instalou bibliotecas: Maven usou o cache exis
 
 Com o cache Java disponível:
 
-~~~sh
+```sh
 ./mvnw -o verify
-~~~
+```
 
 ## Demonstração
 
@@ -55,27 +55,27 @@ Dados fictícios. Validação bancária apenas de formato. A API de demonstraç�
 
 Disponíveis em “Cenários de demonstração”:
 
-| Cenário | Resultado |
-|---|---|
-| CONFIRMAR | 202 e protocolo; confirmação após cinco segundos |
-| REJEITAR | Rejeição assíncrona, preservação da conta e liberação da reserva |
-| INDISPONIVEL | HTTP 503; retries limitados e FALHA_TECNICA |
-| TIMEOUT | Primeiro aceite persiste, resposta atrasa; retry recupera o mesmo protocolo |
-| RESPOSTA_INVALIDA | Protocolo inválido rejeitado pelo backend |
-| ASSINATURA_INVALIDA | Assinatura adulterada rejeitada pelo backend |
+| Cenário             | Resultado                                                                   |
+| ------------------- | --------------------------------------------------------------------------- |
+| CONFIRMAR           | 202 e protocolo; confirmação após cinco segundos                            |
+| REJEITAR            | Rejeição assíncrona, preservação da conta e liberação da reserva            |
+| INDISPONIVEL        | HTTP 503; retries limitados e FALHA_TECNICA                                 |
+| TIMEOUT             | Primeiro aceite persiste, resposta atrasa; retry recupera o mesmo protocolo |
+| RESPOSTA_INVALIDA   | Protocolo inválido rejeitado pelo backend                                   |
+| ASSINATURA_INVALIDA | Assinatura adulterada rejeitada pelo backend                                |
 
 A falha técnica mantém as reservas porque o aceite pode ter ocorrido. “Retomar com a mesma solicitação” reutiliza operação/chave após resolver a causa. Cenários de falha persistente continuam falhando ao retomar.
 
 ## Testes
 
-~~~sh
+```sh
 ./mvnw verify
 cd frontend
 npm test
 npm run build
 cd ..
 python3 scripts/e2e.py
-~~~
+```
 
 O e2e exige os JARs gerados. Usa portas livres e bancos temporários, inicia/reinicia/encerra somente seus processos e não apaga dados locais.
 
@@ -84,6 +84,7 @@ Cobertura: autorização obrigatória/idempotente; concorrência; chave com payl
 ## Configuração
 
 Propriedades Spring aceitam argumentos e variáveis padrão:
+
 - SERVER_PORT: porta do serviço.
 - SPRING_DATASOURCE_URL: banco de dados.
 - INTEGRATION_CENTRAL_URL: endereço da Central no backend.
@@ -95,10 +96,10 @@ Propriedades Spring aceitam argumentos e variáveis padrão:
 
 Para frontend com backend em outra porta:
 
-~~~sh
+```sh
 cd frontend
 API_URL=http://localhost:18080 npm run dev
-~~~
+```
 
 Os dois bancos H2 em arquivo ficam em backend/data e central-mock/data, ignorados pelo Git. Execute a partir da raiz para manter os caminhos estáveis.
 
@@ -130,6 +131,7 @@ Estados: PENDENTE_ENVIO → PENDENTE → CONFIRMADA/REJEITADA. FALHA_TECNICA per
 ## API
 
 Backend:
+
 - POST /api/v1/authorizations — beneficiarioId e convenioId.
 - GET /api/v1/beneficiaries/{id}/agenda.
 - POST /api/v1/portabilities — Idempotency-Key obrigatório.
@@ -138,15 +140,15 @@ Backend:
 - GET /api/v1/portabilities/{id}/events.
 - POST /api/v1/portabilities/{id}/retry.
 
-~~~json
+```json
 {
-  "beneficiarioId": "BEN-001",
-  "parcelas": ["BEN-001-CONV-001-1"],
-  "credorCessionario": "Cielo",
-  "contaRecebimento": {"banco": "237", "agencia": "0001", "conta": "12345-6"},
-  "cenario": "CONFIRMAR"
+    "beneficiarioId": "BEN-001",
+    "parcelas": ["BEN-001-CONV-001-1"],
+    "credorCessionario": "Cielo",
+    "contaRecebimento": { "banco": "237", "agencia": "0001", "conta": "12345-6" },
+    "cenario": "CONFIRMAR"
 }
-~~~
+```
 
 Central: POST /autorizacoes; GET /beneficiarios/{id}/agenda; POST /operacoes-portabilidade; GET /operacoes-portabilidade/{protocolo}. Saúde: /actuator/health em ambos.
 

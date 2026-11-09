@@ -1,0 +1,15 @@
+{
+    "tabWidth": 4,
+    "useTabs": false,
+    "printWidth": 100,
+    "endOfLine": "lf",
+    "plugins": ["prettier-plugin-java", "@prettier/plugin-xml"],
+    "overrides": [
+        {
+            "files": "**/pom.xml",
+            "options": {
+                "xmlWhitespaceSensitivity": "ignore"
+            }
+        }
+    ]
+}

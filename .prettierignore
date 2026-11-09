@@ -1,0 +1,15 @@
+**/node_modules/**
+**/target/**
+**/dist/**
+**/coverage/**
+**/.vite/**
+**/data/**
+
+.idea/**
+.git/**
+
+**/package-lock.json
+
+mvnw
+mvnw.cmd
+.mvn/**
